@@ -1,0 +1,32 @@
+import unittest
+from unittest.mock import patch, MagicMock
+
+class TestExecuteQuery(unittest.TestCase):
+
+    @patch('your_module.pymysql.connect')
+    def test_execute_query(self, mock_connect):
+        # Setup a simpler way to mock the context manager and cursor
+        mock_cursor = MagicMock()
+        mock_connection = mock_connect.return_value.__enter__.return_value
+        mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+
+        # Parameters for the test
+        query = "INSERT INTO test_table (column1) VALUES ('value1')"
+        secret_map = {
+            'host': 'test_host',
+            'user': 'test_user',
+            'password': 'test_password',
+            'database': 'test_database'
+        }
+
+        # Execute the function with the test parameters
+        execute_query(query, secret_map)
+
+        # Assertions remain unchanged
+        mock_connect.assert_called_once_with(host='test_host', user='test_user', password='test_password', database='test_database')
+        mock_cursor.execute.assert_called_once_with(query)
+        mock_connection.commit.assert_called_once()
+        mock_connect.return_value.close.assert_called_once()
+
+if __name__ == '__main__':
+    unittest.main()
