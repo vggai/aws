@@ -1,0 +1,30 @@
+import boto3
+
+# Create an S3 client
+s3 = boto3.client('s3')
+
+def copy_files_simple(source_bucket, source_prefix, destination_bucket, destination_prefix):
+    # List objects in the source bucket
+    response = s3.list_objects_v2(Bucket=source_bucket, Prefix=source_prefix)
+    
+    if 'Contents' in response:
+        for obj in response['Contents']:
+            source_key = obj['Key']
+            destination_key = source_key.replace(source_prefix, destination_prefix, 1)
+
+            # Copy each file from the source directory to the destination directory
+            copy_source = {
+                'Bucket': source_bucket,
+                'Key': source_key
+            }
+            s3.copy(copy_source, destination_bucket, destination_key)
+            print(f"Copied {source_key} to {destination_key}")
+
+# Define source and destination buckets and prefixes
+source_bucket = 'your-source-bucket'
+source_prefix = 'source-folder/'
+destination_bucket = 'your-destination-bucket'
+destination_prefix = 'destination-folder/'
+
+# Copy files
+copy_files_simple(source_bucket, source_prefix, destination_bucket, destination_prefix)
