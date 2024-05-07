@@ -1,0 +1,20 @@
+import boto3
+
+def copy_s3_objects(source_bucket, source_key, destination_bucket, destination_key):
+    # Create an S3 client
+    s3_client = boto3.client('s3')
+    
+    # Copy the object
+    copy_source = {
+        'Bucket': source_bucket,
+        'Key': source_key
+    }
+    s3_client.copy(copy_source, destination_bucket, destination_key)
+
+# Example usage
+source_bucket = 'your-source-bucket'
+source_key = 'your/source/path/object.txt'
+destination_bucket = 'your-destination-bucket'
+destination_key = 'your/destination/path/object.txt'
+
+copy_s3_objects(source_bucket, source_key, destination_bucket, destination_key)
