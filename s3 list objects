@@ -1,0 +1,53 @@
+import unittest
+import boto3
+
+def split_and_upload(file_content, bucket, prefix):
+    s3 = boto3.client('s3')
+    # Split logic
+    midpoint = len(file_content) // 2
+    part1 = file_content[:midpoint]
+    part2 = file_content[midpoint:]
+
+    # Upload to actual S3
+    s3.put_object(Bucket=bucket, Key=f"{prefix}/part1.txt", Body=part1)
+    s3.put_object(Bucket=bucket, Key=f"{prefix}/part2.txt", Body=part2)
+
+class TestRealS3Uploads(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # This method is called once for the entire class
+        cls.bucket = 'your-real-bucket-name'  # Specify the actual bucket name
+        cls.prefix = 'integration-test-files'
+        cls.s3 = boto3.client('s3', region_name='us-east-1')
+        cls.s3.create_bucket(Bucket=cls.bucket)
+
+    @classmethod
+    def tearDownClass(cls):
+        # This method is called once after all tests are completed
+        cls.delete_test_files()
+
+    @classmethod
+    def delete_test_files(cls):
+        """Helper method to delete all files created during the tests in the specified bucket and prefix."""
+        response = cls.s3.list_objects(Bucket=cls.bucket, Prefix=cls.prefix)
+        objects_to_delete = [{'Key': obj['Key']} for obj in response.get('Contents', [])]
+
+        if objects_to_delete:
+            cls.s3.delete_objects(
+                Bucket=cls.bucket,
+                Delete={
+                    'Objects': objects_to_delete,
+                    'Quiet': True
+                }
+            )
+
+    def test_multiple_file_uploads(self):
+        file_content = b"Integration test data to upload."
+        split_and_upload(file_content, self.bucket, self.prefix)
+
+        # Verify the number of uploaded files
+        response = self.s3.list_objects(Bucket=self.bucket, Prefix=self.prefix)
+        self.assertTrue(len(response.get('Contents', [])) > 1)
+
+if __name__ == '__main__':
+    unittest.main()
