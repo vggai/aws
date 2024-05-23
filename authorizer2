@@ -1,0 +1,74 @@
+import json
+import requests
+from lxml import etree
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def validate_access_token(access_token):
+    url = "https://api.sa-server.com/authorize"  # Replace with the actual URL
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return parse_authorize_token_result(response.content)
+    else:
+        return parse_auth_token_error_result(response.content)
+
+def parse_authorize_token_result(xml_content):
+    tree = etree.fromstring(xml_content)
+    result = {
+        "authorizeCode": tree.findtext("authorizeCode"),
+        "authorizeDesc": tree.findtext("authorizeDesc"),
+        "authenticateUserID": tree.findtext("authenticateUserID"),
+        "remainExpireTimeSec": int(tree.findtext("remainExpireTimeSec"))
+    }
+    return result
+
+def parse_auth_token_error_result(xml_content):
+    tree = etree.fromstring(xml_content)
+    error_result = {
+        "code": tree.findtext("code"),
+        "httpStatus": tree.findtext("httpStatus"),
+        "message": tree.findtext("message")
+    }
+    return error_result
+
+def lambda_handler(event, context):
+    access_token = event["authorizationToken"]
+    logger.debug("Validating user with SA Server")
+    
+    try:
+        result = validate_access_token(access_token)
+        
+        if "authorizeCode" in result:
+            logger.info("Authorization Success: User credentials validated with SA server")
+            return generate_policy(result["authenticateUserID"], 'Allow', event["methodArn"])
+        else:
+            logger.error(f"Authorization Failed: {result['message']}")
+            return generate_policy(None, 'Deny', event["methodArn"])
+    except Exception as e:
+        logger.error(f"Exception during token validation: {str(e)}")
+        return generate_policy(None, 'Deny', event["methodArn"])
+
+def generate_policy(principal_id, effect, resource):
+    auth_response = {}
+    auth_response['principalId'] = principal_id if principal_id else 'user'
+    
+    if effect and resource:
+        policy_document = {
+            'Version': '2012-10-17',
+            'Statement': [
+                {
+                    'Action': 'execute-api:Invoke',
+                    'Effect': effect,
+                    'Resource': resource
+                }
+            ]
+        }
+        auth_response['policyDocument'] = policy_document
+
+    return auth_response
