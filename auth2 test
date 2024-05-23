@@ -1,0 +1,51 @@
+import unittest
+from unittest.mock import patch
+from lambda_authorizer import lambda_handler, validate_access_token
+
+class TestLambdaHandler(unittest.TestCase):
+
+    @patch('lambda_authorizer.validate_access_token')
+    def test_lambda_handler_success(self, mock_validate_access_token):
+        # Mock the response for a successful token validation
+        mock_validate_access_token.return_value = {
+            "authorizeCode": "someCode",
+            "authorizeDesc": "someDesc",
+            "authenticateUserID": "someUserID",
+            "remainExpireTimeSec": 3600
+        }
+        
+        event = {
+            "authorizationToken": "valid_token",
+            "methodArn": "arn:aws:execute-api:region:account-id:api-id/stage/verb/resource"
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['principalId'], 'someUserID')
+        self.assertEqual(response['policyDocument']['Statement'][0]['Effect'], 'Allow')
+        self.assertEqual(response['policyDocument']['Statement'][0]['Resource'], event['methodArn'])
+
+    @patch('lambda_authorizer.validate_access_token')
+    def test_lambda_handler_failure(self, mock_validate_access_token):
+        # Mock the response for a failed token validation
+        mock_validate_access_token.return_value = {
+            "code": "InvalidToken",
+            "httpStatus": "401",
+            "message": "The access token is invalid or expired."
+        }
+        
+        event = {
+            "authorizationToken": "invalid_token",
+            "methodArn": "arn:aws:execute-api:region:account-id:api-id/stage/verb/resource"
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['principalId'], 'user')
+        self.assertEqual(response['policyDocument']['Statement'][0]['Effect'], 'Deny')
+        self.assertEqual(response['policyDocument']['Statement'][0]['Resource'], event['methodArn'])
+
+if __name__ == '__main__':
+    unittest.main()
