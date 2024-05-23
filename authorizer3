@@ -1,0 +1,106 @@
+import json
+import requests
+import logging
+import boto3
+from datetime import datetime
+import xml.etree.ElementTree as ET
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('Users')  # Replace with your DynamoDB table name
+
+def validate_token_with_dynamodb(access_token):
+    response = table.get_item(Key={'accessToken': access_token})
+    if 'Item' in response:
+        item = response['Item']
+        expiry_time = datetime.fromtimestamp(item['expiryTime'])
+        if expiry_time > datetime.now():
+            logger.info("Token is valid in DynamoDB")
+            return {'authenticateUserID': item['userID'], 'isValid': True}
+    return {'isValid': False}
+
+def validate_token_with_sa_server(access_token):
+    url = "https://api.sa-server.com/authorize"  # Replace with the actual URL
+    headers = {
+        "Authorization": f"Bearer {access_token}"
+    }
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        result = parse_authorize_token_result(response.content)
+        # Save or update token in DynamoDB
+        table.put_item(
+            Item={
+                'accessToken': access_token,
+                'expiryTime': datetime.now().timestamp() + result['remainExpireTimeSec'],
+                'userID': result['authenticateUserID']
+            }
+        )
+        return result
+    else:
+        return parse_auth_token_error_result(response.content)
+
+def parse_authorize_token_result(xml_content):
+    tree = ET.fromstring(xml_content)
+    result = {
+        "authorizeCode": tree.findtext("authorizeCode"),
+        "authorizeDesc": tree.findtext("authorizeDesc"),
+        "authenticateUserID": tree.findtext("authenticateUserID"),
+        "remainExpireTimeSec": int(tree.findtext("remainExpireTimeSec"))
+    }
+    return result
+
+def parse_auth_token_error_result(xml_content):
+    tree = ET.fromstring(xml_content)
+    error_result = {
+        "code": tree.findtext("code"),
+        "httpStatus": tree.findtext("httpStatus"),
+        "message": tree.findtext("message")
+    }
+    return error_result
+
+def lambda_handler(event, context):
+    access_token = event["authorizationToken"]
+    logger.debug("Validating user with SA Server")
+    
+    try:
+        # First validate with DynamoDB
+        db_validation_result = validate_token_with_dynamodb(access_token)
+        
+        if db_validation_result['isValid']:
+            user_id = db_validation_result['authenticateUserID']
+            return generate_policy(user_id, 'Allow', event["methodArn"])
+        
+        # If DynamoDB validation fails, validate with SA server
+        sa_server_result = validate_token_with_sa_server(access_token)
+        
+        if "authorizeCode" in sa_server_result:
+            logger.info("Authorization Success: User credentials validated with SA server")
+            return generate_policy(sa_server_result["authenticateUserID"], 'Allow', event["methodArn"])
+        else:
+            logger.error(f"Authorization Failed: {sa_server_result['message']}")
+            return generate_policy(None, 'Deny', event["methodArn"])
+    except Exception as e:
+        logger.error(f"Exception during token validation: {str(e)}")
+        return generate_policy(None, 'Deny', event["methodArn"])
+
+def generate_policy(principal_id, effect, resource):
+    auth_response = {}
+    auth_response['principalId'] = principal_id if principal_id else 'user'
+    
+    if effect and resource:
+        policy_document = {
+            'Version': '2012-10-17',
+            'Statement': [
+                {
+                    'Action': 'execute-api:Invoke',
+                    'Effect': effect,
+                    'Resource': resource
+                }
+            ]
+        }
+        auth_response['policyDocument'] = policy_document
+
+    return auth_response
